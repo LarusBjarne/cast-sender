@@ -39,6 +39,8 @@ impl Receiver {
         }
     }
 
+    /// Connect to an IP address with an optional port, defaulting to port 8009.
+    /// IPv6 addresses with an explicit port must be enclosed in brackets.
     pub async fn connect(&self, addr: &str) -> Result<(), Error> {
         let client = Client::connect(addr).await?;
         self.client.lock().await.replace(client.clone());

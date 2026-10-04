@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{AddrParseError, SocketAddr};
 use std::sync::Arc;
 
 use async_native_tls::{TlsConnector, TlsStream};
@@ -31,8 +31,12 @@ pub struct Client {
 }
 
 impl Client {
+    /// Connect to an IP address with an optional port.
+    ///
+    /// Bare IPv4 and IPv6 addresses use port 8009. IPv6 addresses with an
+    /// explicit port must be enclosed in brackets, for example `[::1]:8009`.
     pub async fn connect(addr: &str) -> Result<Self, Error> {
-        let addr = SocketAddr::new(addr.parse()?, 8009);
+        let addr = parse_endpoint(addr)?;
 
         // Casts devices are using self signed certs
         let tls_connector = TlsConnector::new().danger_accept_invalid_certs(true);
@@ -131,6 +135,11 @@ impl Client {
     }
 }
 
+fn parse_endpoint(addr: &str) -> Result<SocketAddr, AddrParseError> {
+    addr.parse::<SocketAddr>()
+        .or_else(|_| addr.parse().map(|ip| SocketAddr::new(ip, 8009)))
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct PayloadData {
@@ -138,4 +147,34 @@ struct PayloadData {
     request_id: Option<u32>,
     #[serde(flatten)]
     data: Payload,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_endpoint;
+
+    #[test]
+    fn bare_ip_addresses_use_default_port() {
+        for (input, expected) in [
+            ("192.0.2.1", "192.0.2.1:8009"),
+            ("2001:db8::1", "[2001:db8::1]:8009"),
+            ("::1", "[::1]:8009"),
+        ] {
+            assert_eq!(parse_endpoint(input).unwrap(), expected.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn socket_addresses_preserve_advertised_port() {
+        for input in ["192.0.2.1:32123", "[2001:db8::1]:32123", "[::1]:8009"] {
+            assert_eq!(parse_endpoint(input).unwrap(), input.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn invalid_endpoints_are_rejected() {
+        for input in ["", "not-an-ip", "192.0.2.1:65536", "[::1]:invalid"] {
+            assert!(parse_endpoint(input).is_err(), "accepted {input}");
+        }
+    }
 }
